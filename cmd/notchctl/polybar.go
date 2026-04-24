@@ -24,8 +24,8 @@ type chipView struct {
 }
 
 const (
-	maxChips    = 4
-	maxNameLen  = 10
+	maxChips    = 5
+	maxNameLen  = 22
 	colorRun    = "#a6e3a1"
 	colorAwait  = "#fab387"
 	colorIdle   = "#6c7086"
@@ -79,7 +79,7 @@ func buildChipViews(s proto.Snapshot) []chipView {
 	for id, sess := range s.Sessions {
 		cv := chipView{
 			sid:    id,
-			name:   shortName(sess.CWD),
+			name:   displayName(id, sess.CWD),
 			status: sess.Status,
 			tool:   sess.LastTool,
 		}
@@ -151,10 +151,23 @@ func shortName(cwd string) string {
 	if base == "" || base == "/" || base == "." {
 		return "~"
 	}
-	if len(base) > maxNameLen {
-		return base[:maxNameLen-1] + "…"
+	return truncate(base, maxNameLen)
+}
+
+// displayName prefers the transcript-derived session title over CWD basename.
+func displayName(sid, cwd string) string {
+	if t := sessionTitle(sid); t != "" {
+		return truncate(t, maxNameLen)
 	}
-	return base
+	return shortName(cwd)
+}
+
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 // ---- workspace lookup ---------------------------------------------------
