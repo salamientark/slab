@@ -26,6 +26,7 @@ const (
 // Daemon owns all session state and connected subscribers.
 type Daemon struct {
 	socketPath string
+	statePath  string
 
 	mu       sync.Mutex
 	sessions map[string]*proto.Session
@@ -35,14 +36,56 @@ type Daemon struct {
 	pending map[string]chan proto.Decision
 }
 
-// New constructs a Daemon bound to socketPath.
-func New(socketPath string) *Daemon {
-	return &Daemon{
+// New constructs a Daemon bound to socketPath. statePath, if non-empty, is
+// where sessions are persisted across restarts.
+func New(socketPath, statePath string) *Daemon {
+	d := &Daemon{
 		socketPath: socketPath,
+		statePath:  statePath,
 		sessions:   make(map[string]*proto.Session),
 		subs:       make(map[chan proto.Snapshot]struct{}),
 		pending:    make(map[string]chan proto.Decision),
 	}
+	d.loadState()
+	return d
+}
+
+func (d *Daemon) loadState() {
+	if d.statePath == "" {
+		return
+	}
+	b, err := os.ReadFile(d.statePath)
+	if err != nil {
+		return
+	}
+	var loaded map[string]*proto.Session
+	if err := json.Unmarshal(b, &loaded); err != nil {
+		log.Printf("loadState: %v", err)
+		return
+	}
+	// Filter dead pids on load.
+	for id, s := range loaded {
+		if s.PID > 0 && syscall.Kill(s.PID, 0) == nil {
+			d.sessions[id] = s
+		}
+	}
+	log.Printf("loaded %d sessions from %s", len(d.sessions), d.statePath)
+}
+
+// saveStateLocked persists sessions to disk. Caller must hold d.mu.
+func (d *Daemon) saveStateLocked() {
+	if d.statePath == "" {
+		return
+	}
+	b, err := json.Marshal(d.sessions)
+	if err != nil {
+		return
+	}
+	tmp := d.statePath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, d.statePath)
 }
 
 // Run blocks until ctx is cancelled.
@@ -61,6 +104,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	log.Printf("notchd listening on %s", d.socketPath)
+
+	d.BootstrapFromProc()
 
 	go d.livenessProbe(ctx)
 
@@ -313,9 +358,9 @@ func (d *Daemon) applyEvent(ev proto.Event) {
 		if ev.ToolName != "" {
 			s.LastTool = ev.ToolName
 		}
-	case "Stop":
+	case "Stop", "Notification":
 		if s.Status == proto.StatusRunning || s.Status == proto.StatusAwaiting {
-			s.Notify = true // task finished, mark unseen
+			s.Notify = true // task finished / awaiting user, mark unseen
 		}
 		s.Status = proto.StatusIdle
 	case "SessionEnd":
@@ -344,6 +389,7 @@ func (d *Daemon) publishLocked(trigger string) {
 			// subscriber is slow; drop.
 		}
 	}
+	d.saveStateLocked()
 }
 
 // snapshotLocked builds an aggregate view. Caller must hold d.mu.
