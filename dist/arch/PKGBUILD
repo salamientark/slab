@@ -1,0 +1,31 @@
+# Maintainer: Damien <damien@jiliac.com>
+pkgname=i3-notch
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Status-notch for AI coding agents on i3/polybar/dunst"
+arch=('x86_64')
+url="https://github.com/jiliac/i3-notch"
+license=('MIT')
+depends=('polybar' 'dunst' 'xdotool' 'i3-wm' 'jq')
+makedepends=('go')
+optdepends=('tmux: pane-level jump support')
+source=()
+sha256sums=()
+
+build() {
+  cd "$startdir/../.."
+  export CGO_ENABLED=0
+  go build -trimpath -ldflags="-s -w" -o "$srcdir/notchd" ./cmd/notchd
+  go build -trimpath -ldflags="-s -w" -o "$srcdir/notchctl" ./cmd/notchctl
+}
+
+package() {
+  install -Dm755 "$srcdir/notchd"   "$pkgdir/usr/bin/notchd"
+  install -Dm755 "$srcdir/notchctl" "$pkgdir/usr/bin/notchctl"
+  install -Dm644 "$startdir/../../dist/systemd/i3-notch.service" \
+    "$pkgdir/usr/lib/systemd/user/i3-notch.service"
+  install -Dm755 "$startdir/../../hooks/hook.sh" \
+    "$pkgdir/usr/share/i3-notch/hook.sh"
+  install -Dm644 "$startdir/../../README.md" \
+    "$pkgdir/usr/share/doc/i3-notch/README.md"
+}

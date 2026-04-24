@@ -1,0 +1,15 @@
+[Unit]
+Description=i3-notch daemon (notchd)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/notchd
+Restart=on-failure
+RestartSec=2s
+# Socket lives in $XDG_RUNTIME_DIR/i3-notch.sock
+# Daemon handles SIGINT/SIGTERM and cleans up socket
+
+[Install]
+WantedBy=graphical-session.target
