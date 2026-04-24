@@ -20,7 +20,9 @@ type chipView struct {
 	ws      string // workspace name, "" if unknown
 	output  string // i3 output (monitor) name
 	status  proto.Status
+	notify  bool
 	tool    string
+	project string // project-type glyph
 }
 
 const (
@@ -32,6 +34,7 @@ const (
 	colorBadge  = "#89b4fa"
 	colorMuted  = "#45475a"
 	colorBorder = "#313244"
+	colorNotify = "#f9e2af" // yellow — "done, please look"
 )
 
 var selfExe string // resolved absolute path of this binary
@@ -78,10 +81,12 @@ func buildChipViews(s proto.Snapshot) []chipView {
 	out := make([]chipView, 0, len(s.Sessions))
 	for id, sess := range s.Sessions {
 		cv := chipView{
-			sid:    id,
-			name:   displayName(id, sess.CWD),
-			status: sess.Status,
-			tool:   sess.LastTool,
+			sid:     id,
+			name:    displayName(id, sess.CWD),
+			status:  sess.Status,
+			notify:  sess.Notify,
+			tool:    sess.LastTool,
+			project: projectIcon(sess.CWD),
 		}
 		if wi, ok := wsMap[sess.PID]; ok {
 			cv.ws = wi.ws
@@ -90,7 +95,7 @@ func buildChipViews(s proto.Snapshot) []chipView {
 		out = append(out, cv)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		ri, rj := chipRank(out[i].status), chipRank(out[j].status)
+		ri, rj := sortRank(out[i]), sortRank(out[j])
 		if ri != rj {
 			return ri > rj
 		}
@@ -99,13 +104,16 @@ func buildChipViews(s proto.Snapshot) []chipView {
 	return out
 }
 
-func chipRank(st proto.Status) int {
-	switch st {
+func sortRank(v chipView) int {
+	switch v.status {
 	case proto.StatusAwaiting:
-		return 3
+		return 4
 	case proto.StatusRunning:
-		return 2
+		return 3
 	case proto.StatusIdle:
+		if v.notify {
+			return 2 // done-unseen floats above plain idle
+		}
 		return 1
 	}
 	return 0
@@ -115,25 +123,37 @@ func renderChip(v chipView) string {
 	var icon, color string
 	switch v.status {
 	case proto.StatusAwaiting:
-		icon = "" // bell
+		icon = "⚠"
 		color = colorAwait
 	case proto.StatusRunning:
-		icon = "" // spinner/gear
+		icon = "⚡"
 		color = colorRun
 	case proto.StatusIdle:
-		icon = "" // pause
+		icon = "⏾"
 		color = colorIdle
 	default:
-		icon = ""
+		icon = "◎"
 		color = colorIdle
 	}
-	wsTag := ""
-	if v.ws != "" {
-		wsTag = fmt.Sprintf(" %%{F%s}%s%%{F-}", colorBadge, v.ws)
+	if v.notify {
+		icon = "✔"
+		color = colorNotify
 	}
-	label := fmt.Sprintf("%s %s%s", icon, v.name, wsTag)
+	ws := v.ws
+	if ws == "" {
+		ws = "?"
+	}
+	sep := fmt.Sprintf(" %%{F%s}|%%{F-} ", colorMuted)
+	nameColor := ""
+	nameEnd := ""
+	if v.notify {
+		nameColor = fmt.Sprintf("%%{F%s}%%{u%s}%%{+u}", colorNotify, colorNotify)
+		nameEnd = "%{-u}%{F-}"
+	}
+	label := fmt.Sprintf("%%{F%s}%s%%{F-}%s%%{F%s}%s%%{F-}%s%s%s%s",
+		colorBadge, ws, sep, color, icon, sep, nameColor, v.name, nameEnd)
 	click := fmt.Sprintf("%s jump %s", selfExe, v.sid)
-	return fmt.Sprintf("%%{A1:%s:}%%{F%s}%s%%{F-}%%{A}", click, color, label)
+	return fmt.Sprintf("%%{A1:%s:}%s%%{A}", click, label)
 }
 
 func aggColor(st proto.Status) string {
@@ -160,6 +180,39 @@ func displayName(sid, cwd string) string {
 		return truncate(t, maxNameLen)
 	}
 	return shortName(cwd)
+}
+
+// projectIcon returns a nerd-font glyph derived from manifest files in cwd.
+// Falls back to a folder icon.
+func projectIcon(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	checks := []struct {
+		file string
+		icon string
+	}{
+		{"go.mod", ""},       // go
+		{"Cargo.toml", ""},   // rust
+		{"package.json", ""}, // js/node
+		{"pyproject.toml", ""},
+		{"requirements.txt", ""},
+		{"Gemfile", ""},
+		{"pubspec.yaml", ""},
+		{"build.gradle", ""},
+		{"build.gradle.kts", ""},
+		{"pom.xml", ""},
+		{"composer.json", ""},
+		{"CMakeLists.txt", ""},
+		{"Makefile", ""},
+		{".git", ""},
+	}
+	for _, c := range checks {
+		if _, err := os.Stat(filepath.Join(cwd, c.file)); err == nil {
+			return c.icon
+		}
+	}
+	return ""
 }
 
 func truncate(s string, n int) string {

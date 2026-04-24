@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/jiliac/i3-notch/internal/proto"
@@ -197,12 +196,29 @@ func runJump(args []string) error {
 	if len(args) > 0 {
 		target = snap.Sessions[args[0]]
 	} else {
-		target = pickWorst(snap)
+		target = pickNotifyOrWorst(snap)
 	}
 	if target == nil {
 		return errors.New("no session to jump to")
 	}
-	return focusSession(target)
+	if err := focusSession(target); err != nil {
+		return err
+	}
+	_ = ackSession(target.ID)
+	return nil
+}
+
+func ackSession(sid string) error {
+	conn, err := dial()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	msg := fmt.Sprintf(`{"role":"command","cmd":"ack","sid":%q}`+"\n", sid)
+	if _, err := conn.Write([]byte(msg)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func fetchSnapshot() (*proto.Snapshot, error) {
@@ -232,6 +248,16 @@ func pickWorst(s *proto.Snapshot) *proto.Session {
 		}
 	}
 	return best
+}
+
+// pickNotifyOrWorst prefers an unacknowledged-completed session, else worst.
+func pickNotifyOrWorst(s *proto.Snapshot) *proto.Session {
+	for _, sess := range s.Sessions {
+		if sess.Notify {
+			return sess
+		}
+	}
+	return pickWorst(s)
 }
 
 func statusRank(s proto.Status) int {
@@ -270,21 +296,30 @@ func focusSession(s *proto.Session) error {
 	return nil
 }
 
+// xdotoolFindWindow walks up the process tree until a pid owns an X11 window
+// that is present in the i3 tree (i.e. a real client window, not a notification
+// or other transient).
 func xdotoolFindWindow(pid int) (uint64, error) {
-	out, err := exec.Command("xdotool", "search", "--all", "--pid", strconv.Itoa(pid)).Output()
+	tree, err := getI3Tree()
 	if err != nil {
-		return 0, fmt.Errorf("xdotool search pid=%d: %w", pid, err)
+		return 0, err
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
+	wsMap := buildWindowWorkspaceMap(tree)
+
+	cur := pid
+	for hop := 0; hop < 8 && cur > 1; hop++ {
+		for _, xw := range xdotoolSearchAll(cur) {
+			if _, ok := wsMap[xw]; ok {
+				return xw, nil
+			}
 		}
-		id, err := strconv.ParseUint(strings.TrimSpace(line), 10, 64)
-		if err == nil {
-			return id, nil
+		ppid, perr := parentPID(cur)
+		if perr != nil || ppid == cur {
+			break
 		}
+		cur = ppid
 	}
-	return 0, fmt.Errorf("no window found for pid %d", pid)
+	return 0, fmt.Errorf("no window found for pid %d (walked parents)", pid)
 }
 
 func i3ConIDForWindow(xwin uint64) (uint64, error) {

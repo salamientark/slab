@@ -99,6 +99,7 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 	var header struct {
 		Role string `json:"role"`
 		Cmd  string `json:"cmd,omitempty"`
+		SID  string `json:"sid,omitempty"`
 	}
 	if err := json.Unmarshal(firstLine, &header); err != nil {
 		fmt.Fprintf(conn, `{"error":"bad header: %s"}`+"\n", err)
@@ -113,7 +114,7 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 	case "decide":
 		d.serveDecider(rd)
 	case "command":
-		d.serveCommand(conn, header.Cmd)
+		d.serveCommand(conn, header.Cmd, header.SID)
 	default:
 		fmt.Fprintf(conn, `{"error":"unknown role %q"}`+"\n", header.Role)
 	}
@@ -198,13 +199,25 @@ func (d *Daemon) serveDecider(rd *bufio.Reader) {
 	}
 }
 
-func (d *Daemon) serveCommand(conn net.Conn, cmd string) {
-	d.mu.Lock()
-	snap := d.snapshotLocked("")
-	d.mu.Unlock()
+func (d *Daemon) serveCommand(conn net.Conn, cmd, sid string) {
 	switch cmd {
 	case "list":
+		d.mu.Lock()
+		snap := d.snapshotLocked("")
+		d.mu.Unlock()
 		json.NewEncoder(conn).Encode(snap)
+	case "ack":
+		d.mu.Lock()
+		if sid == "" {
+			for _, s := range d.sessions {
+				s.Notify = false
+			}
+		} else if s, ok := d.sessions[sid]; ok {
+			s.Notify = false
+		}
+		d.publishLocked(sid)
+		d.mu.Unlock()
+		fmt.Fprintln(conn, `{"ok":true}`)
 	default:
 		fmt.Fprintf(conn, `{"error":"unknown cmd %q"}`+"\n", cmd)
 	}
@@ -287,7 +300,10 @@ func (d *Daemon) applyEvent(ev proto.Event) {
 	switch ev.Kind {
 	case "SessionStart":
 		s.Status = proto.StatusIdle
-	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
+	case "UserPromptSubmit":
+		s.Notify = false // user engaged with this session
+		s.Status = proto.StatusRunning
+	case "PreToolUse", "PostToolUse":
 		s.Status = proto.StatusRunning
 		if ev.ToolName != "" {
 			s.LastTool = ev.ToolName
@@ -298,6 +314,9 @@ func (d *Daemon) applyEvent(ev proto.Event) {
 			s.LastTool = ev.ToolName
 		}
 	case "Stop":
+		if s.Status == proto.StatusRunning || s.Status == proto.StatusAwaiting {
+			s.Notify = true // task finished, mark unseen
+		}
 		s.Status = proto.StatusIdle
 	case "SessionEnd":
 		s.Status = proto.StatusEnded
