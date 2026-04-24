@@ -182,33 +182,6 @@ func runSubscribe(args []string) error {
 	}
 }
 
-// formatPolybar emits one line understood by polybar's custom/script tail module.
-// Icons use nerd-font glyphs; caller must set font-1 accordingly.
-func formatPolybar(s proto.Snapshot) string {
-	if s.AggCount == 0 {
-		return "%{F#555555}󰚩 idle%{F-}"
-	}
-	var icon, color string
-	switch s.AggStatus {
-	case proto.StatusAwaiting:
-		icon = "󰀧" // bell
-		color = "#ff8800"
-	case proto.StatusRunning:
-		icon = "󰜎" // running
-		color = "#22cc66"
-	case proto.StatusIdle:
-		icon = "󰚩" // bot
-		color = "#888888"
-	default:
-		icon = "󰚩"
-		color = "#888888"
-	}
-	label := fmt.Sprintf("%s %d", icon, s.AggCount)
-	// Left click → jump to trigger session (or most-severe).
-	clickJump := "notchctl jump"
-	return fmt.Sprintf("%%{A1:%s:}%%{F%s}%s%%{F-}%%{A}", clickJump, color, label)
-}
-
 func formatPlain(s proto.Snapshot) string {
 	return fmt.Sprintf("%s (%d)", s.AggStatus, s.AggCount)
 }
