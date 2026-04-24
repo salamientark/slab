@@ -11,9 +11,10 @@ import (
 	"time"
 )
 
-// sessionTitle returns a short human-readable title for a session, derived
-// from the first real user prompt in its JSONL transcript. Results are cached
-// per session id until the transcript file's mtime advances.
+// sessionTitle returns a short human-readable title for a session. Prefers
+// the latest `custom-title` JSONL entry (set via /title); falls back to the
+// first real user prompt. Cached per session id until the transcript mtime
+// advances.
 func sessionTitle(sessionID string) string {
 	return titleCache.get(sessionID)
 }
@@ -53,24 +54,14 @@ func (t *titleStore) get(sid string) string {
 		return entry.title
 	}
 
-	title := extractFirstUserPrompt(path)
+	title := extractTitle(path)
 	t.m[sid] = cachedTitle{title: title, mtime: fi.ModTime(), path: path}
 	return title
 }
 
-func homeDir() string {
-	if h, err := os.UserHomeDir(); err == nil {
-		return h
-	}
-	return os.Getenv("HOME")
-}
-
-var stripTagRE = regexp.MustCompile(`<[^>]{1,60}>`)
-
-// extractFirstUserPrompt scans the transcript for the first user message
-// that isn't a local-command-caveat / command-name wrapper, and returns a
-// trimmed first-line excerpt.
-func extractFirstUserPrompt(path string) string {
+// extractTitle scans the transcript and returns the latest custom-title
+// entry if present, otherwise the first real user prompt.
+func extractTitle(path string) string {
 	f, err := os.Open(path)
 	if err != nil {
 		return ""
@@ -80,19 +71,28 @@ func extractFirstUserPrompt(path string) string {
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
+	var custom, firstPrompt string
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
 		var rec struct {
-			Type    string `json:"type"`
-			Message struct {
+			Type        string `json:"type"`
+			CustomTitle string `json:"customTitle"`
+			Message     struct {
 				Role    string `json:"role"`
 				Content any    `json:"content"`
 			} `json:"message"`
 		}
 		if err := json.Unmarshal(line, &rec); err != nil {
+			continue
+		}
+		if rec.Type == "custom-title" && rec.CustomTitle != "" {
+			custom = rec.CustomTitle
+			continue
+		}
+		if firstPrompt != "" {
 			continue
 		}
 		if rec.Type != "user" || rec.Message.Role != "user" {
@@ -106,10 +106,22 @@ func extractFirstUserPrompt(path string) string {
 		if text == "" || strings.HasPrefix(text, "/") {
 			continue
 		}
-		return text
+		firstPrompt = text
 	}
-	return ""
+	if custom != "" {
+		return custom
+	}
+	return firstPrompt
 }
+
+func homeDir() string {
+	if h, err := os.UserHomeDir(); err == nil {
+		return h
+	}
+	return os.Getenv("HOME")
+}
+
+var stripTagRE = regexp.MustCompile(`<[^>]{1,60}>`)
 
 // isCommandMessage returns true for slash-command wrappers and local-command
 // stdout / caveat blocks — anything not authored directly by the user.
