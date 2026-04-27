@@ -366,7 +366,7 @@ func (d *Daemon) applyEvent(ev proto.Event) {
 		}
 		s.Status = proto.StatusIdle
 	case "Notification":
-		s.Status = proto.StatusAwaiting
+		// informational only; do not flip to awaiting (only PermissionRequest does)
 	case "SessionEnd":
 		s.Status = proto.StatusEnded
 	}

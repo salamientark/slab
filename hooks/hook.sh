@@ -19,6 +19,20 @@ NOTCHCTL="${SCRIPT_DIR}/../bin/notchctl"
 KIND="${1:-unknown}"
 INPUT="$(cat)"
 
+# Claude Code's Notification hook is overloaded:
+#   - permission prompts (need user decision → awaiting)
+#   - idle "waiting for input" pings (informational only)
+# Disambiguate by inspecting message field. Promote permission-style
+# notifications to PermissionRequest so daemon flips to StatusAwaiting.
+if [ "$KIND" = "Notification" ]; then
+    NMSG="$(printf '%s' "$INPUT" | jq -r '.message // ""')"
+    case "${NMSG,,}" in
+        *permission*|*approve*|*allow\ to*|*needs\ your*)
+            KIND="PermissionRequest"
+            ;;
+    esac
+fi
+
 # Required: jq and notchctl on PATH.
 SESSION_ID="$(printf '%s' "$INPUT" | jq -r '.session_id // .sessionId // ""')"
 TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // ""')"
