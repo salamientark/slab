@@ -21,6 +21,8 @@ import (
 const (
 	livenessProbeInterval = 2 * time.Second
 	approvalTimeout       = 30 * time.Second
+	staleRunningTTL       = 5 * time.Minute
+	staleAwaitingTTL      = 10 * time.Minute
 )
 
 // Daemon owns all session state and connected subscribers.
@@ -440,14 +442,33 @@ func (d *Daemon) livenessProbe(ctx context.Context) {
 		case <-t.C:
 			d.mu.Lock()
 			changed := false
+			now := time.Now()
 			for id, s := range d.sessions {
 				if s.PID == 0 || s.Status == proto.StatusEnded {
 					continue
 				}
+				// 1. dead-pid sweep
 				if err := syscall.Kill(s.PID, 0); err != nil {
 					s.Status = proto.StatusEnded
 					delete(d.sessions, id)
 					changed = true
+					continue
+				}
+				// 2. stale-status demotion: alive PID but no events for too long
+				age := now.Sub(s.LastEventAt)
+				switch s.Status {
+				case proto.StatusRunning:
+					if age > staleRunningTTL {
+						s.Status = proto.StatusIdle
+						changed = true
+						log.Printf("janitor: %s demoted running → idle (age %s)", id, age.Round(time.Second))
+					}
+				case proto.StatusAwaiting:
+					if age > staleAwaitingTTL {
+						s.Status = proto.StatusIdle
+						changed = true
+						log.Printf("janitor: %s demoted awaiting → idle (age %s)", id, age.Round(time.Second))
+					}
 				}
 			}
 			if changed {
