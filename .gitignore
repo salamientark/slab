@@ -18,3 +18,4 @@ vendor/
 .claude/settings.local.json
 .env
 .env.local
+DOCS/CODEMAPS/*

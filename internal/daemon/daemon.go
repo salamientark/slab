@@ -358,11 +358,13 @@ func (d *Daemon) applyEvent(ev proto.Event) {
 		if ev.ToolName != "" {
 			s.LastTool = ev.ToolName
 		}
-	case "Stop", "Notification":
+	case "Stop":
 		if s.Status == proto.StatusRunning || s.Status == proto.StatusAwaiting {
-			s.Notify = true // task finished / awaiting user, mark unseen
+			s.Notify = true // task finished, mark unseen
 		}
 		s.Status = proto.StatusIdle
+	case "Notification":
+		s.Status = proto.StatusAwaiting
 	case "SessionEnd":
 		s.Status = proto.StatusEnded
 	}

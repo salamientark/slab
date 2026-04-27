@@ -1,4 +1,8 @@
 {
+  "statusLine": {
+    "type": "command",
+    "command": "$CLAUDE_PROJECT_DIR/hooks/statusline.sh"
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -10,7 +14,8 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/hook.sh UserPromptSubmit" }
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/hook.sh UserPromptSubmit" },
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/session-topic.sh" }
         ]
       }
     ],
