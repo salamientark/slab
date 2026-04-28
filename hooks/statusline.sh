@@ -2,7 +2,8 @@
 # Statusline: print session topic (if any) + cwd basename.
 set -euo pipefail
 
-INPUT="$(cat)"
+INPUT="$(timeout 2 cat 2>/dev/null || true)"
+[ -z "$INPUT" ] && { printf '[?]'; exit 0; }
 SID="$(printf '%s' "$INPUT" | jq -r '.session_id // ""')"
 CWD="$(printf '%s' "$INPUT" | jq -r '.workspace.current_dir // .cwd // ""')"
 PROJ="$(printf '%s' "$INPUT" | jq -r '.workspace.project_dir // empty')"

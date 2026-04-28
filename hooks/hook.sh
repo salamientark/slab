@@ -11,13 +11,17 @@
 
 set -euo pipefail
 
+# Recursion guard: skip when invoked from inside our own `claude -p` calls.
+[ "${I3NOTCH_HOOK_INHIBIT:-0}" = "1" ] && exit 0
+
 # Locate notchctl relative to this script so hooks don't depend on PATH.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NOTCHCTL="${SCRIPT_DIR}/../bin/notchctl"
 [ -x "$NOTCHCTL" ] || NOTCHCTL="$(command -v notchctl || echo /home/madlab/PROJECTS/i3-notch/bin/notchctl)"
 
 KIND="${1:-unknown}"
-INPUT="$(cat)"
+INPUT="$(timeout 2 cat 2>/dev/null || true)"
+[ -z "$INPUT" ] && exit 0
 
 # Claude Code's Notification hook is overloaded:
 #   - permission prompts (need user decision → awaiting)
@@ -77,7 +81,7 @@ EVENT="$(jq -cn \
       tmux_session:$tms, tmux_window:$tmw, tmux_pane:$tmp,
       timestamp:$now}')"
 
-RESP="$(printf '%s\n' "$EVENT" | "$NOTCHCTL" publish 2>/dev/null || echo '{}')"
+RESP="$(printf '%s\n' "$EVENT" | timeout 5 "$NOTCHCTL" publish 2>/dev/null || echo '{}')"
 
 if [ "$KIND" = "PermissionRequest" ]; then
     # Translate Decision → hookSpecificOutput JSON expected by Claude Code.
