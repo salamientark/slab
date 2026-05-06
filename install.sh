@@ -137,7 +137,7 @@ cat <<EOF
   binaries:  $USER_BIN/notchd, $USER_BIN/notchctl
   service:   systemctl --user status i3-notch
   polybar:   reload with \`$POLYBAR_DIR/launch.sh\`
-  uninstall: $REPO_ROOT/uninstall.sh
+  uninstall: see docs/install.md (no uninstall.sh yet — manual marker-block removal)
 
 Backups suffixed .bak-$TS
 EOF
