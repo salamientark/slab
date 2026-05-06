@@ -110,6 +110,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.BootstrapFromProc()
 
 	go d.livenessProbe(ctx)
+	go d.watchI3Focus()
 
 	go func() {
 		<-ctx.Done()
