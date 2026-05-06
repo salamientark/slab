@@ -114,8 +114,9 @@ systemctl --user enable --now i3-notch.service
 log "systemd unit enabled + started"
 
 # ---- polybar config -------------------------------------------------------
-tmp_notch="$(mktemp)"; trap 'rm -f "$tmp_notch" "$tmp_launch"' EXIT
+tmp_notch="$(mktemp)"
 tmp_launch="$(mktemp)"
+trap 'rm -f "$tmp_notch" "$tmp_launch"' EXIT
 
 substitute "$DIST_DIR/polybar/notch.conf"        > "$tmp_notch"
 substitute "$DIST_DIR/polybar/launch-snippet.sh" > "$tmp_launch"
@@ -126,8 +127,7 @@ chmod +x "$POLYBAR_DIR/launch.sh"
 
 # ---- claude hooks (optional) ---------------------------------------------
 if [[ $WITH_HOOKS -eq 1 ]]; then
-  log "TODO: merge hooks block into $CLAUDE_SETTINGS via jq"
-  # placeholder — requires jq merge design; see docs/install.md
+  die "--with-hooks is not yet implemented; see docs/install.md and merge the hooks block manually for now"
 fi
 
 # ---- done -----------------------------------------------------------------
