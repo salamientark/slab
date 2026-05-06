@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -22,18 +23,25 @@ type i3WindowEvent struct {
 
 // watchI3Focus subscribes to i3 window events and clears Notify on the
 // session whose terminal just got focused. Reconnects on disconnect.
-func (d *Daemon) watchI3Focus() {
+func (d *Daemon) watchI3Focus(ctx context.Context) {
 	for {
-		cmd := exec.Command("i3-msg", "-t", "subscribe", "-m", `["window"]`)
+		if ctx.Err() != nil {
+			return
+		}
+		cmd := exec.CommandContext(ctx, "i3-msg", "-t", "subscribe", "-m", `["window"]`)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			log.Printf("i3 subscribe pipe: %v", err)
-			time.Sleep(2 * time.Second)
+			if !sleepOrDone(ctx, 2*time.Second) {
+				return
+			}
 			continue
 		}
 		if err := cmd.Start(); err != nil {
 			log.Printf("i3 subscribe start: %v", err)
-			time.Sleep(2 * time.Second)
+			if !sleepOrDone(ctx, 2*time.Second) {
+				return
+			}
 			continue
 		}
 		sc := bufio.NewScanner(stdout)
@@ -49,8 +57,24 @@ func (d *Daemon) watchI3Focus() {
 			d.handleFocus(uint64(ev.Container.Window))
 		}
 		_ = cmd.Wait()
+		if ctx.Err() != nil {
+			return
+		}
 		log.Printf("i3 window subscription ended; retrying")
-		time.Sleep(time.Second)
+		if !sleepOrDone(ctx, time.Second) {
+			return
+		}
+	}
+}
+
+func sleepOrDone(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 
