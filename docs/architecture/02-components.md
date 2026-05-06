@@ -2,7 +2,7 @@
 
 ## Layout
 
-```
+```text
 cmd/notchd/main.go         daemon entrypoint (signal, ctx, paths)
 cmd/notchctl/main.go       client CLI dispatch + jump
 cmd/notchctl/polybar.go    polybar tail-line renderer + workspace lookup
@@ -23,7 +23,7 @@ install.sh                 idempotent installer (marker blocks)
 
 ## Component schema
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────────┐
 │ notchd                                                               │
 │ ┌──────────────────────────────────────────────────────────────────┐ │

@@ -4,7 +4,7 @@
 
 ## Flow
 
-```
+```text
 notchctl jump [SID]
        │
        ▼
@@ -43,7 +43,7 @@ ackSession(sid)  ── role=command cmd=ack sid=…
 
 ## Why the 8-hop walk
 
-```
+```text
 i3 → alacritty (xwin owner)
         └── shell (zsh)
               └── claude CLI       ← Session.PID points here

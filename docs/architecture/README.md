@@ -18,7 +18,7 @@ Full walk-through of how `i3-notch` works. Each doc one concern.
 
 ## Quick map
 
-```
+```text
 Claude Code CLI (one per terminal)
    │ stdin JSON per hook event
    ▼
