@@ -220,4 +220,4 @@ Build locally: `cd dist/arch && makepkg -si`.
 
 ## License
 
-Personal project. Inspired-by, not derived-from, VibeIsland. No DMCA/EULA exposure.
+[MIT](LICENSE).

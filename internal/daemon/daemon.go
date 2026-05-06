@@ -21,11 +21,14 @@ import (
 const (
 	livenessProbeInterval = 2 * time.Second
 	approvalTimeout       = 30 * time.Second
+	staleRunningTTL       = 5 * time.Minute
+	staleAwaitingTTL      = 10 * time.Minute
 )
 
 // Daemon owns all session state and connected subscribers.
 type Daemon struct {
 	socketPath string
+	statePath  string
 
 	mu       sync.Mutex
 	sessions map[string]*proto.Session
@@ -35,14 +38,56 @@ type Daemon struct {
 	pending map[string]chan proto.Decision
 }
 
-// New constructs a Daemon bound to socketPath.
-func New(socketPath string) *Daemon {
-	return &Daemon{
+// New constructs a Daemon bound to socketPath. statePath, if non-empty, is
+// where sessions are persisted across restarts.
+func New(socketPath, statePath string) *Daemon {
+	d := &Daemon{
 		socketPath: socketPath,
+		statePath:  statePath,
 		sessions:   make(map[string]*proto.Session),
 		subs:       make(map[chan proto.Snapshot]struct{}),
 		pending:    make(map[string]chan proto.Decision),
 	}
+	d.loadState()
+	return d
+}
+
+func (d *Daemon) loadState() {
+	if d.statePath == "" {
+		return
+	}
+	b, err := os.ReadFile(d.statePath)
+	if err != nil {
+		return
+	}
+	var loaded map[string]*proto.Session
+	if err := json.Unmarshal(b, &loaded); err != nil {
+		log.Printf("loadState: %v", err)
+		return
+	}
+	// Filter dead pids on load.
+	for id, s := range loaded {
+		if s.PID > 0 && syscall.Kill(s.PID, 0) == nil {
+			d.sessions[id] = s
+		}
+	}
+	log.Printf("loaded %d sessions from %s", len(d.sessions), d.statePath)
+}
+
+// saveStateLocked persists sessions to disk. Caller must hold d.mu.
+func (d *Daemon) saveStateLocked() {
+	if d.statePath == "" {
+		return
+	}
+	b, err := json.Marshal(d.sessions)
+	if err != nil {
+		return
+	}
+	tmp := d.statePath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, d.statePath)
 }
 
 // Run blocks until ctx is cancelled.
@@ -61,6 +106,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	log.Printf("notchd listening on %s", d.socketPath)
+
+	d.BootstrapFromProc()
 
 	go d.livenessProbe(ctx)
 
@@ -99,6 +146,7 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 	var header struct {
 		Role string `json:"role"`
 		Cmd  string `json:"cmd,omitempty"`
+		SID  string `json:"sid,omitempty"`
 	}
 	if err := json.Unmarshal(firstLine, &header); err != nil {
 		fmt.Fprintf(conn, `{"error":"bad header: %s"}`+"\n", err)
@@ -113,7 +161,7 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 	case "decide":
 		d.serveDecider(rd)
 	case "command":
-		d.serveCommand(conn, header.Cmd)
+		d.serveCommand(conn, header.Cmd, header.SID)
 	default:
 		fmt.Fprintf(conn, `{"error":"unknown role %q"}`+"\n", header.Role)
 	}
@@ -198,13 +246,25 @@ func (d *Daemon) serveDecider(rd *bufio.Reader) {
 	}
 }
 
-func (d *Daemon) serveCommand(conn net.Conn, cmd string) {
-	d.mu.Lock()
-	snap := d.snapshotLocked("")
-	d.mu.Unlock()
+func (d *Daemon) serveCommand(conn net.Conn, cmd, sid string) {
 	switch cmd {
 	case "list":
+		d.mu.Lock()
+		snap := d.snapshotLocked("")
+		d.mu.Unlock()
 		json.NewEncoder(conn).Encode(snap)
+	case "ack":
+		d.mu.Lock()
+		if sid == "" {
+			for _, s := range d.sessions {
+				s.Notify = false
+			}
+		} else if s, ok := d.sessions[sid]; ok {
+			s.Notify = false
+		}
+		d.publishLocked(sid)
+		d.mu.Unlock()
+		fmt.Fprintln(conn, `{"ok":true}`)
 	default:
 		fmt.Fprintf(conn, `{"error":"unknown cmd %q"}`+"\n", cmd)
 	}
@@ -287,7 +347,10 @@ func (d *Daemon) applyEvent(ev proto.Event) {
 	switch ev.Kind {
 	case "SessionStart":
 		s.Status = proto.StatusIdle
-	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
+	case "UserPromptSubmit":
+		s.Notify = false // user engaged with this session
+		s.Status = proto.StatusRunning
+	case "PreToolUse", "PostToolUse":
 		s.Status = proto.StatusRunning
 		if ev.ToolName != "" {
 			s.LastTool = ev.ToolName
@@ -298,7 +361,12 @@ func (d *Daemon) applyEvent(ev proto.Event) {
 			s.LastTool = ev.ToolName
 		}
 	case "Stop":
+		if s.Status == proto.StatusRunning || s.Status == proto.StatusAwaiting {
+			s.Notify = true // task finished, mark unseen
+		}
 		s.Status = proto.StatusIdle
+	case "Notification":
+		// informational only; do not flip to awaiting (only PermissionRequest does)
 	case "SessionEnd":
 		s.Status = proto.StatusEnded
 	}
@@ -325,6 +393,7 @@ func (d *Daemon) publishLocked(trigger string) {
 			// subscriber is slow; drop.
 		}
 	}
+	d.saveStateLocked()
 }
 
 // snapshotLocked builds an aggregate view. Caller must hold d.mu.
@@ -373,14 +442,33 @@ func (d *Daemon) livenessProbe(ctx context.Context) {
 		case <-t.C:
 			d.mu.Lock()
 			changed := false
+			now := time.Now()
 			for id, s := range d.sessions {
 				if s.PID == 0 || s.Status == proto.StatusEnded {
 					continue
 				}
+				// 1. dead-pid sweep
 				if err := syscall.Kill(s.PID, 0); err != nil {
 					s.Status = proto.StatusEnded
 					delete(d.sessions, id)
 					changed = true
+					continue
+				}
+				// 2. stale-status demotion: alive PID but no events for too long
+				age := now.Sub(s.LastEventAt)
+				switch s.Status {
+				case proto.StatusRunning:
+					if age > staleRunningTTL {
+						s.Status = proto.StatusIdle
+						changed = true
+						log.Printf("janitor: %s demoted running → idle (age %s)", id, age.Round(time.Second))
+					}
+				case proto.StatusAwaiting:
+					if age > staleAwaitingTTL {
+						s.Status = proto.StatusIdle
+						changed = true
+						log.Printf("janitor: %s demoted awaiting → idle (age %s)", id, age.Round(time.Second))
+					}
 				}
 			}
 			if changed {

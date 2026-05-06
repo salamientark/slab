@@ -49,6 +49,7 @@ type Session struct {
 	TmuxWin     string    `json:"tmux_window,omitempty"`
 	TmuxPane    string    `json:"tmux_pane,omitempty"`
 	Status      Status    `json:"status"`
+	Notify      bool      `json:"notify,omitempty"` // completed-unseen: task finished, user not yet acknowledged
 	LastTool    string    `json:"last_tool,omitempty"`
 	LastEventAt time.Time `json:"last_event_at"`
 	StartedAt   time.Time `json:"started_at"`
