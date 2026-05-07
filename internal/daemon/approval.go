@@ -58,6 +58,14 @@ func askViaDunst(ev proto.Event) (proto.Decision, error) {
 			dec.Reason = "user denied via notification"
 			return dec, err
 		default:
+			// Empty stdout: either dunstify hit --timeout=remaining (overall
+			// deadline reached — outer guard breaks next iter) or it exited
+			// early (dunst restarted, dunstctl close-all, etc.). If real time
+			// remains, re-prompt instead of silently denying.
+			if time.Until(deadline) > 500*time.Millisecond {
+				time.Sleep(time.Second)
+				continue
+			}
 			dec.Reason = "no response from notification"
 			return dec, err
 		}
