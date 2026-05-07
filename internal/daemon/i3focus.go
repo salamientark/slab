@@ -17,7 +17,7 @@ import (
 type i3WindowEvent struct {
 	Change    string `json:"change"`
 	Container struct {
-		Window float64 `json:"window"`
+		Window uint32 `json:"window"`
 	} `json:"container"`
 }
 
@@ -54,7 +54,9 @@ func (d *Daemon) watchI3Focus(ctx context.Context) {
 			if ev.Change != "focus" || ev.Container.Window == 0 {
 				continue
 			}
-			d.handleFocus(uint64(ev.Container.Window))
+			focusCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			d.handleFocus(focusCtx, uint64(ev.Container.Window))
+			cancel()
 		}
 		_ = cmd.Wait()
 		if ctx.Err() != nil {
@@ -78,7 +80,7 @@ func sleepOrDone(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func (d *Daemon) handleFocus(xwin uint64) {
+func (d *Daemon) handleFocus(ctx context.Context, xwin uint64) {
 	d.mu.Lock()
 	type cand struct {
 		sid string
@@ -93,7 +95,7 @@ func (d *Daemon) handleFocus(xwin uint64) {
 	d.mu.Unlock()
 
 	for _, c := range notifyCands {
-		if sessionOwnsWindow(c.pid, xwin) {
+		if sessionOwnsWindow(ctx, c.pid, xwin) {
 			d.mu.Lock()
 			if s, ok := d.sessions[c.sid]; ok && s.Notify {
 				s.Notify = false
@@ -107,10 +109,10 @@ func (d *Daemon) handleFocus(xwin uint64) {
 
 // sessionOwnsWindow walks up pid's parent chain (max 8 hops) and asks
 // xdotool whether any ancestor owns xwin.
-func sessionOwnsWindow(pid int, xwin uint64) bool {
+func sessionOwnsWindow(ctx context.Context, pid int, xwin uint64) bool {
 	cur := pid
 	for hop := 0; hop < 8 && cur > 1; hop++ {
-		for _, w := range xdotoolSearchAll(cur) {
+		for _, w := range xdotoolSearchAll(ctx, cur) {
 			if w == xwin {
 				return true
 			}
@@ -124,8 +126,8 @@ func sessionOwnsWindow(pid int, xwin uint64) bool {
 	return false
 }
 
-func xdotoolSearchAll(pid int) []uint64 {
-	out, err := exec.Command("xdotool", "search", "--all", "--pid", strconv.Itoa(pid)).Output()
+func xdotoolSearchAll(ctx context.Context, pid int) []uint64 {
+	out, err := exec.CommandContext(ctx, "xdotool", "search", "--all", "--pid", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return nil
 	}
