@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# Tests for bin/i3-notch-toggle subcommand dispatch.
+# Strategy: stub systemctl/polybar/pkill/notify-send/pgrep on PATH so we
+# observe what the script tries to do without touching the real system.
+
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+TOGGLE="$ROOT/scripts/i3-notch-toggle"
+
+PASS=0
+FAIL=0
+FAILS=()
+
+run_case() {
+  local name="$1"; shift
+  if "$@"; then
+    PASS=$((PASS+1))
+    printf '  ok  %s\n' "$name"
+  else
+    FAIL=$((FAIL+1))
+    FAILS+=("$name")
+    printf '  FAIL %s\n' "$name"
+  fi
+}
+
+setup_stubs() {
+  STUBDIR="$(mktemp -d)"
+  LOG="$STUBDIR/calls.log"
+  : > "$LOG"
+  # Configurable stub responses via env vars.
+  for cmd in systemctl polybar pkill notify-send pgrep nohup; do
+    cat > "$STUBDIR/$cmd" <<EOF
+#!/usr/bin/env bash
+printf '%s %s\n' "$cmd" "\$*" >> "$LOG"
+case "$cmd" in
+  systemctl)
+    if [ "\$*" = "--user is-active --quiet i3-notch" ]; then
+      exit \${STUB_SYSTEMCTL_ACTIVE:-1}
+    fi
+    exit 0
+    ;;
+  pgrep)
+    exit \${STUB_PGREP_RC:-1}
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOF
+    chmod +x "$STUBDIR/$cmd"
+  done
+  export PATH="$STUBDIR:$PATH"
+}
+
+teardown_stubs() {
+  rm -rf "$STUBDIR"
+  unset STUB_SYSTEMCTL_ACTIVE STUB_PGREP_RC
+}
+
+case_status_inactive() {
+  setup_stubs
+  STUB_SYSTEMCTL_ACTIVE=1 STUB_PGREP_RC=1 \
+    out="$("$TOGGLE" status 2>&1)"
+  local rc=$?
+  teardown_stubs
+  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qiE 'inactive|stopped|off'
+}
+
+case_status_active() {
+  setup_stubs
+  STUB_SYSTEMCTL_ACTIVE=0 STUB_PGREP_RC=0 \
+    out="$("$TOGGLE" status 2>&1)"
+  local rc=$?
+  teardown_stubs
+  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qiE 'active|running|on'
+}
+
+case_start_when_stopped() {
+  setup_stubs
+  STUB_SYSTEMCTL_ACTIVE=1 STUB_PGREP_RC=1 \
+    "$TOGGLE" start >/dev/null 2>&1
+  local rc=$?
+  grep -q 'systemctl --user start i3-notch' "$LOG" || { teardown_stubs; return 1; }
+  teardown_stubs
+  [ "$rc" -eq 0 ]
+}
+
+case_stop_when_running() {
+  setup_stubs
+  STUB_SYSTEMCTL_ACTIVE=0 STUB_PGREP_RC=0 \
+    "$TOGGLE" stop >/dev/null 2>&1
+  local rc=$?
+  grep -q 'systemctl --user stop i3-notch' "$LOG" || { teardown_stubs; return 1; }
+  teardown_stubs
+  [ "$rc" -eq 0 ]
+}
+
+case_toggle_starts_when_stopped() {
+  setup_stubs
+  STUB_SYSTEMCTL_ACTIVE=1 STUB_PGREP_RC=1 \
+    "$TOGGLE" toggle >/dev/null 2>&1
+  local rc=$?
+  grep -q 'systemctl --user start i3-notch' "$LOG" || { teardown_stubs; return 1; }
+  teardown_stubs
+  [ "$rc" -eq 0 ]
+}
+
+case_toggle_no_arg_starts_when_stopped() {
+  setup_stubs
+  STUB_SYSTEMCTL_ACTIVE=1 STUB_PGREP_RC=1 \
+    "$TOGGLE" >/dev/null 2>&1
+  local rc=$?
+  grep -q 'systemctl --user start i3-notch' "$LOG" || { teardown_stubs; return 1; }
+  teardown_stubs
+  [ "$rc" -eq 0 ]
+}
+
+case_start_starts_raiser_unit() {
+  setup_stubs
+  STUB_SYSTEMCTL_ACTIVE=1 STUB_PGREP_RC=1 \
+    "$TOGGLE" start >/dev/null 2>&1
+  local rc=$?
+  grep -q 'systemctl --user start .*i3-notch-raise' "$LOG" || { teardown_stubs; return 1; }
+  teardown_stubs
+  [ "$rc" -eq 0 ]
+}
+
+case_stop_stops_raiser_unit() {
+  setup_stubs
+  STUB_SYSTEMCTL_ACTIVE=0 STUB_PGREP_RC=0 \
+    "$TOGGLE" stop >/dev/null 2>&1
+  local rc=$?
+  grep -q 'systemctl --user stop .*i3-notch-raise' "$LOG" || { teardown_stubs; return 1; }
+  teardown_stubs
+  [ "$rc" -eq 0 ]
+}
+
+case_unknown_subcommand_errors() {
+  setup_stubs
+  "$TOGGLE" frobnicate >/dev/null 2>&1
+  local rc=$?
+  teardown_stubs
+  [ "$rc" -ne 0 ]
+}
+
+echo "i3-notch-toggle subcommand tests"
+run_case "status reports inactive when off" case_status_inactive
+run_case "status reports active when on" case_status_active
+run_case "start when stopped invokes systemctl start" case_start_when_stopped
+run_case "stop when running invokes systemctl stop" case_stop_when_running
+run_case "toggle starts when stopped" case_toggle_starts_when_stopped
+run_case "no-arg toggles (back-compat)" case_toggle_no_arg_starts_when_stopped
+run_case "start invokes raiser unit" case_start_starts_raiser_unit
+run_case "stop invokes raiser unit" case_stop_stops_raiser_unit
+run_case "unknown subcommand exits non-zero" case_unknown_subcommand_errors
+
+echo
+echo "passed: $PASS  failed: $FAIL"
+if [ "$FAIL" -gt 0 ]; then
+  printf 'failures:\n'
+  for f in "${FAILS[@]}"; do printf '  - %s\n' "$f"; done
+  exit 1
+fi

@@ -1,0 +1,66 @@
+#!/bin/bash
+# i3-notch lifecycle controller.
+# Subcommands: start | stop | status | toggle (default).
+
+set -u
+
+NOTCH_BAR="notch"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RAISE_SCRIPT="${I3_NOTCH_RAISE_SCRIPT:-$SCRIPT_DIR/raise-notch.sh}"
+
+is_active() {
+  systemctl --user is-active --quiet i3-notch
+}
+
+bar_running() {
+  pgrep -f "polybar ${NOTCH_BAR}\b" >/dev/null
+}
+
+stop_all() {
+  systemctl --user stop i3-notch-raise i3-notch
+  pkill -f "polybar ${NOTCH_BAR}\b" 2>/dev/null
+  pkill -f "raise-notch.sh" 2>/dev/null
+  notify-send -t 1500 "i3-notch" "off" 2>/dev/null || true
+}
+
+start_all() {
+  systemctl --user start i3-notch
+  if ! bar_running; then
+    polybar notch 2>&1 | tee -a /tmp/polybar-notch.log & disown
+  fi
+  # Raiser keeps the override-redirect notch above all windows. Prefer the
+  # systemd unit if installed; fall back to spawning the script directly.
+  if systemctl --user list-unit-files i3-notch-raise.service >/dev/null 2>&1; then
+    systemctl --user start i3-notch-raise
+  elif ! pgrep -f raise-notch.sh >/dev/null; then
+    nohup "$RAISE_SCRIPT" >/tmp/raise-notch.log 2>&1 & disown
+  fi
+  notify-send -t 1500 "i3-notch" "on" 2>/dev/null || true
+}
+
+cmd_status() {
+  if is_active || bar_running; then
+    echo "i3-notch: active"
+  else
+    echo "i3-notch: inactive"
+  fi
+}
+
+cmd_toggle() {
+  if is_active || bar_running; then
+    stop_all
+  else
+    start_all
+  fi
+}
+
+case "${1:-toggle}" in
+  start)  start_all ;;
+  stop)   stop_all ;;
+  status) cmd_status ;;
+  toggle) cmd_toggle ;;
+  *)
+    echo "usage: $(basename "$0") [start|stop|status|toggle]" >&2
+    exit 2
+    ;;
+esac
