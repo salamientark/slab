@@ -19,6 +19,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NOTCHCTL="${SCRIPT_DIR}/../bin/notchctl"
 [ -x "$NOTCHCTL" ] || NOTCHCTL="$(command -v notchctl || echo /home/madlab/PROJECTS/i3-notch/bin/notchctl)"
 
+# Socket-presence guard: if the daemon isn't running, exit 0 with no stdout
+# so PermissionRequest hooks fall back to Claude Code's native prompt instead
+# of auto-denying via the empty `{}` publish response.
+SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/i3-notch.sock"
+[ -S "$SOCK" ] || exit 0
+
 KIND="${1:-unknown}"
 INPUT="$(timeout 2 cat 2>/dev/null || true)"
 [ -z "$INPUT" ] && exit 0
