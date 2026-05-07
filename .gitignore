@@ -20,3 +20,4 @@ vendor/
 .env.local
 docs/CODEMAPS/
 NOTES.md
+.claude/
