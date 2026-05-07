@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,7 +17,7 @@ const dunstTotalTimeout = 25 * time.Second
 // askViaDunst fires dunstify with three actions (focus/allow/deny). Body
 // click ("default") focuses the session and re-prompts. Allow/Deny resolve
 // the request. Returns an empty-reason decision on overall timeout.
-func askViaDunst(ev proto.Event) (proto.Decision, error) {
+func askViaDunst(ctx context.Context, ev proto.Event) (proto.Decision, error) {
 	title := "Claude Code"
 	body := fmt.Sprintf("Allow <b>%s</b>?", htmlEscape(ev.ToolName))
 	if ev.CWD != "" {
@@ -33,7 +34,7 @@ func askViaDunst(ev proto.Event) (proto.Decision, error) {
 		}
 		ms := int(remaining / time.Millisecond)
 
-		cmd := exec.Command("dunstify",
+		cmd := exec.CommandContext(ctx, "dunstify",
 			"--urgency=critical",
 			"--appname=i3-notch",
 			"-A", "default,Focus",
@@ -49,7 +50,7 @@ func askViaDunst(ev proto.Event) (proto.Decision, error) {
 		dec := proto.Decision{RequestID: ev.RequestID}
 		switch choice {
 		case "default":
-			focusSession(ev.SessionID)
+			focusSession(ctx, ev.SessionID)
 			continue
 		case "allow":
 			dec.Allow = true
@@ -63,7 +64,10 @@ func askViaDunst(ev proto.Event) (proto.Decision, error) {
 			// early (dunst restarted, dunstctl close-all, etc.). If real time
 			// remains, re-prompt instead of silently denying.
 			if time.Until(deadline) > 500*time.Millisecond {
-				time.Sleep(time.Second)
+				if !sleepOrDone(ctx, time.Second) {
+					dec.Reason = "shutdown"
+					return dec, ctx.Err()
+				}
 				continue
 			}
 			dec.Reason = "no response from notification"
@@ -75,7 +79,7 @@ func askViaDunst(ev proto.Event) (proto.Decision, error) {
 
 // focusSession spawns `notchctl jump SID` to bring the session window to
 // front. Best-effort; errors are ignored — the dunst loop keeps prompting.
-func focusSession(sid string) {
+func focusSession(ctx context.Context, sid string) {
 	bin := "notchctl"
 	if exe, err := os.Executable(); err == nil {
 		candidate := filepath.Join(filepath.Dir(exe), "notchctl")
@@ -84,7 +88,7 @@ func focusSession(sid string) {
 		}
 	}
 	go func() {
-		_ = exec.Command(bin, "jump", sid).Run()
+		_ = exec.CommandContext(ctx, bin, "jump", sid).Run()
 	}()
 }
 

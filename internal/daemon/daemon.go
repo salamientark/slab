@@ -156,7 +156,7 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 
 	switch header.Role {
 	case "publish":
-		d.servePublisher(rd, conn)
+		d.servePublisher(ctx, rd, conn)
 	case "subscribe":
 		d.serveSubscriber(ctx, conn)
 	case "decide":
@@ -168,7 +168,7 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 	}
 }
 
-func (d *Daemon) servePublisher(rd *bufio.Reader, conn net.Conn) {
+func (d *Daemon) servePublisher(ctx context.Context, rd *bufio.Reader, conn net.Conn) {
 	for {
 		line, err := rd.ReadBytes('\n')
 		if err != nil {
@@ -182,7 +182,7 @@ func (d *Daemon) servePublisher(rd *bufio.Reader, conn net.Conn) {
 
 		if ev.Kind == "PermissionRequest" && ev.RequestID != "" {
 			// Blocking: wait for decision or timeout.
-			decision := d.handleApproval(ev)
+			decision := d.handleApproval(ctx, ev)
 			b, _ := json.Marshal(decision)
 			conn.Write(append(b, '\n'))
 			continue
@@ -273,7 +273,7 @@ func (d *Daemon) serveCommand(conn net.Conn, cmd, sid string) {
 
 // handleApproval registers a pending approval request, notifies subscribers
 // (they fire dunstify), and blocks until a decide-role client replies.
-func (d *Daemon) handleApproval(ev proto.Event) proto.Decision {
+func (d *Daemon) handleApproval(ctx context.Context, ev proto.Event) proto.Decision {
 	ch := make(chan proto.Decision, 1)
 
 	d.mu.Lock()
@@ -285,7 +285,7 @@ func (d *Daemon) handleApproval(ev proto.Event) proto.Decision {
 	// Fire dunstify; deliver its result into the same channel. A concurrent
 	// `notchctl decide` (manual override) can still win the race.
 	go func() {
-		dec, err := askViaDunst(ev)
+		dec, err := askViaDunst(ctx, ev)
 		if err != nil {
 			log.Printf("dunstify: %v", err)
 		}
