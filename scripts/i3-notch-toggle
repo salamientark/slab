@@ -17,9 +17,16 @@ bar_running() {
 }
 
 stop_all() {
-  systemctl --user stop i3-notch-raise i3-notch
-  pkill -f "polybar ${NOTCH_BAR}\b" 2>/dev/null
-  pkill -f "raise-notch.sh" 2>/dev/null
+  if systemctl --user list-unit-files i3-notch-raise.service >/dev/null 2>&1; then
+    systemctl --user stop i3-notch-raise 2>/dev/null || true
+  fi
+  systemctl --user stop i3-notch 2>/dev/null || true
+  # -fx: full cmdline must match exactly. Avoids killing editors with the
+  # script open or other processes whose argv contains "polybar notch".
+  pkill -fx "polybar ${NOTCH_BAR}" 2>/dev/null
+  # Raise script runs as `bash /path/to/raise-notch.sh`. Anchor on the bash
+  # invocation so an editor opening the file doesn't match.
+  pkill -f '^(/usr/bin/env +)?bash .*raise-notch\.sh' 2>/dev/null
   notify-send -t 1500 "i3-notch" "off" 2>/dev/null || true
 }
 

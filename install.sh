@@ -109,9 +109,12 @@ mkdir -p "$SYSTEMD_USER_DIR"
 sed -e "s|/usr/bin/notchd|${BIN_DIR}/notchd|g" \
     "$DIST_DIR/systemd/i3-notch.service" \
     > "$SYSTEMD_USER_DIR/i3-notch.service"
+substitute "$DIST_DIR/systemd/i3-notch-raise.service" \
+    > "$SYSTEMD_USER_DIR/i3-notch-raise.service"
 systemctl --user daemon-reload
 systemctl --user enable --now i3-notch.service
-log "systemd unit enabled + started"
+systemctl --user enable --now i3-notch-raise.service
+log "systemd units enabled + started"
 
 # ---- polybar config -------------------------------------------------------
 tmp_notch="$(mktemp)"

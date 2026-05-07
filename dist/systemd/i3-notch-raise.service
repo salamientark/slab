@@ -6,7 +6,7 @@ BindsTo=i3-notch.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env bash %h/PROJECTS/i3-notch/scripts/raise-notch.sh
+ExecStart=/usr/bin/env bash __I3NOTCH_ROOT__/scripts/raise-notch.sh
 Restart=on-failure
 RestartSec=2s
 
