@@ -20,6 +20,6 @@ raise
 
 # Workspace switches don't always fire a window event; subscribe to both so
 # fullscreen toggles and workspace navigation also trigger a re-raise.
-exec i3-msg -t subscribe -m '[ "window", "workspace" ]' 2>/dev/null | while read -r _; do
+i3-msg -t subscribe -m '[ "window", "workspace" ]' 2>/dev/null | while read -r _; do
   raise
 done

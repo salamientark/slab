@@ -23,7 +23,14 @@ NOTCHCTL="${SCRIPT_DIR}/../bin/notchctl"
 # so PermissionRequest hooks fall back to Claude Code's native prompt instead
 # of auto-denying via the empty `{}` publish response.
 SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/i3-notch.sock"
-[ -S "$SOCK" ] || exit 0
+if [ ! -S "$SOCK" ]; then
+    # Opt-in journal trace so missing-daemon drops are debuggable.
+    # Set I3NOTCH_HOOK_DEBUG=1 to enable.
+    if [ "${I3NOTCH_HOOK_DEBUG:-0}" = "1" ] && command -v logger >/dev/null 2>&1; then
+        logger -t i3-notch-hook "drop kind=${1:-unknown} reason=no-socket sock=$SOCK"
+    fi
+    exit 0
+fi
 
 KIND="${1:-unknown}"
 INPUT="$(timeout 2 cat 2>/dev/null || true)"
