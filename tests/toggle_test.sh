@@ -61,20 +61,21 @@ teardown_stubs() {
 
 case_status_inactive() {
   setup_stubs
-  STUB_SYSTEMCTL_ACTIVE=1 STUB_PGREP_RC=1 \
-    out="$("$TOGGLE" status 2>&1)"
-  local rc=$?
+  export STUB_SYSTEMCTL_ACTIVE=1 STUB_PGREP_RC=1
+  local out rc
+  out="$("$TOGGLE" status 2>&1)"; rc=$?
   teardown_stubs
-  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qiE 'inactive|stopped|off'
+  # systemctl-style: inactive returns 3.
+  [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -qE '^i3-notch: inactive$'
 }
 
 case_status_active() {
   setup_stubs
-  STUB_SYSTEMCTL_ACTIVE=0 STUB_PGREP_RC=0 \
-    out="$("$TOGGLE" status 2>&1)"
-  local rc=$?
+  export STUB_SYSTEMCTL_ACTIVE=0 STUB_PGREP_RC=0
+  local out rc
+  out="$("$TOGGLE" status 2>&1)"; rc=$?
   teardown_stubs
-  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qiE 'active|running|on'
+  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qE '^i3-notch: active$'
 }
 
 case_start_when_stopped() {

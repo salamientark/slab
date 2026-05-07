@@ -48,9 +48,10 @@ start_all() {
 cmd_status() {
   if is_active || bar_running; then
     echo "i3-notch: active"
-  else
-    echo "i3-notch: inactive"
+    return 0
   fi
+  echo "i3-notch: inactive"
+  return 3
 }
 
 cmd_toggle() {

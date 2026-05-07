@@ -21,5 +21,8 @@ raise
 # Workspace switches don't always fire a window event; subscribe to both so
 # fullscreen toggles and workspace navigation also trigger a re-raise.
 i3-msg -t subscribe -m '[ "window", "workspace" ]' 2>/dev/null | while read -r _; do
+  # Coalesce event bursts (rapid workspace switches, mass window maps) into
+  # a single raise to avoid X traffic floods.
+  while read -r -t 0.05 _; do :; done
   raise
 done
