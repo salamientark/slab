@@ -188,6 +188,30 @@ EOF
   [ "$rc" -eq 0 ]
 }
 
+case_start_falls_back_to_nohup_when_raise_unit_missing() {
+  setup_stubs
+  # Override systemctl: list-unit-files exits 1 (no raiser unit); start ok.
+  cat > "$STUBDIR/systemctl" <<EOF
+#!/usr/bin/env bash
+printf '%s %s\n' "systemctl" "\$*" >> "$LOG"
+case "\$*" in
+  "--user is-active --quiet i3-notch") exit \${STUB_SYSTEMCTL_ACTIVE:-1} ;;
+  "--user list-unit-files i3-notch-raise.service") exit 1 ;;
+  *) exit 0 ;;
+esac
+EOF
+  chmod +x "$STUBDIR/systemctl"
+  STUB_SYSTEMCTL_ACTIVE=1 STUB_PGREP_RC=1 \
+    "$TOGGLE" start >/dev/null 2>&1
+  local rc=$?
+  if grep -qE 'systemctl --user start +i3-notch-raise' "$LOG"; then
+    teardown_stubs; return 1
+  fi
+  grep -q '^nohup ' "$LOG" || { teardown_stubs; return 1; }
+  teardown_stubs
+  [ "$rc" -eq 0 ]
+}
+
 case_unknown_subcommand_errors() {
   setup_stubs
   "$TOGGLE" frobnicate >/dev/null 2>&1
@@ -208,6 +232,7 @@ run_case "stop invokes raiser unit" case_stop_stops_raiser_unit
 run_case "stop pkill polybar uses exact match" case_stop_pkill_polybar_uses_exact_match
 run_case "stop pkill raise-notch.sh anchored on bash invocation" case_stop_pkill_raise_anchored
 run_case "stop skips raise unit when not installed" case_stop_skips_raise_when_unit_missing
+run_case "start falls back to nohup when raise unit missing" case_start_falls_back_to_nohup_when_raise_unit_missing
 run_case "unknown subcommand exits non-zero" case_unknown_subcommand_errors
 
 echo

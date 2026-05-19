@@ -13,7 +13,7 @@ is_active() {
 }
 
 bar_running() {
-  pgrep -f "polybar ${NOTCH_BAR}\b" >/dev/null
+  pgrep -fx "polybar ${NOTCH_BAR}" >/dev/null
 }
 
 stop_all() {
@@ -31,7 +31,10 @@ stop_all() {
 }
 
 start_all() {
-  systemctl --user start i3-notch
+  if ! systemctl --user start i3-notch; then
+    notify-send -t 2000 "i3-notch" "failed to start i3-notch" 2>/dev/null || true
+    return 1
+  fi
   if ! bar_running; then
     polybar notch 2>&1 | tee -a /tmp/polybar-notch.log & disown
   fi
@@ -39,7 +42,7 @@ start_all() {
   # systemd unit if installed; fall back to spawning the script directly.
   if systemctl --user list-unit-files i3-notch-raise.service >/dev/null 2>&1; then
     systemctl --user start i3-notch-raise
-  elif ! pgrep -f raise-notch.sh >/dev/null; then
+  elif ! pgrep -f '^(/usr/bin/env +)?bash .*raise-notch\.sh' >/dev/null; then
     nohup "$RAISE_SCRIPT" >/tmp/raise-notch.log 2>&1 & disown
   fi
   notify-send -t 1500 "i3-notch" "on" 2>/dev/null || true

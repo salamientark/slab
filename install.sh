@@ -89,6 +89,7 @@ log "checking prereqs…"
 need go
 need polybar
 need i3
+need xdotool
 need systemctl
 [[ $WITH_HOOKS -eq 1 ]] && need jq
 
