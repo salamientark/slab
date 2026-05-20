@@ -1,0 +1,77 @@
+#!/bin/bash
+# i3-notch lifecycle controller.
+# Subcommands: start | stop | status | toggle (default).
+
+set -u
+
+NOTCH_BAR="notch"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RAISE_SCRIPT="${I3_NOTCH_RAISE_SCRIPT:-$SCRIPT_DIR/raise-notch.sh}"
+
+is_active() {
+  systemctl --user is-active --quiet i3-notch
+}
+
+bar_running() {
+  pgrep -fx "polybar ${NOTCH_BAR}" >/dev/null
+}
+
+stop_all() {
+  if systemctl --user list-unit-files i3-notch-raise.service >/dev/null 2>&1; then
+    systemctl --user stop i3-notch-raise 2>/dev/null || true
+  fi
+  systemctl --user stop i3-notch 2>/dev/null || true
+  # -fx: full cmdline must match exactly. Avoids killing editors with the
+  # script open or other processes whose argv contains "polybar notch".
+  pkill -fx "polybar ${NOTCH_BAR}" 2>/dev/null
+  # Raise script runs as `bash /path/to/raise-notch.sh`. Anchor on the bash
+  # invocation so an editor opening the file doesn't match.
+  pkill -f '^(/usr/bin/env +)?bash .*raise-notch\.sh' 2>/dev/null
+  notify-send -t 1500 "i3-notch" "off" 2>/dev/null || true
+}
+
+start_all() {
+  if ! systemctl --user start i3-notch; then
+    notify-send -t 2000 "i3-notch" "failed to start i3-notch" 2>/dev/null || true
+    return 1
+  fi
+  if ! bar_running; then
+    polybar notch 2>&1 | tee -a /tmp/polybar-notch.log & disown
+  fi
+  # Raiser keeps the override-redirect notch above all windows. Prefer the
+  # systemd unit if installed; fall back to spawning the script directly.
+  if systemctl --user list-unit-files i3-notch-raise.service >/dev/null 2>&1; then
+    systemctl --user start i3-notch-raise
+  elif ! pgrep -f '^(/usr/bin/env +)?bash .*raise-notch\.sh' >/dev/null; then
+    nohup "$RAISE_SCRIPT" >/tmp/raise-notch.log 2>&1 & disown
+  fi
+  notify-send -t 1500 "i3-notch" "on" 2>/dev/null || true
+}
+
+cmd_status() {
+  if is_active || bar_running; then
+    echo "i3-notch: active"
+    return 0
+  fi
+  echo "i3-notch: inactive"
+  return 3
+}
+
+cmd_toggle() {
+  if is_active || bar_running; then
+    stop_all
+  else
+    start_all
+  fi
+}
+
+case "${1:-toggle}" in
+  start)  start_all ;;
+  stop)   stop_all ;;
+  status) cmd_status ;;
+  toggle) cmd_toggle ;;
+  *)
+    echo "usage: $(basename "$0") [start|stop|status|toggle]" >&2
+    exit 2
+    ;;
+esac

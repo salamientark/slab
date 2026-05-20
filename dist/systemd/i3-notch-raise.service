@@ -1,0 +1,14 @@
+[Unit]
+Description=i3-notch polybar raiser (keeps notch bar on top)
+After=graphical-session.target i3-notch.service
+PartOf=graphical-session.target
+BindsTo=i3-notch.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env bash __I3NOTCH_ROOT__/scripts/raise-notch.sh
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=graphical-session.target
